@@ -1,0 +1,572 @@
+"""
+NEXUS Terminal v2 — full-screen ANSI cockpit at 20fps.
+Code rain background · holographic panels · agent swarm · camera · voice · github
+"""
+
+import sys, os, time, threading, textwrap, random, math
+from datetime import datetime
+from pathlib import Path
+
+
+# ── ANSI primitives ───────────────────────────────────────────────────────────
+
+ESC = '\x1b'
+def mv(r,c):      return f'{ESC}[{r};{c}H'
+def hide():       return f'{ESC}[?25l'
+def show():       return f'{ESC}[?25h'
+def alt():        return f'{ESC}[?1049h'
+def norm():       return f'{ESC}[?1049l'
+def rst():        return f'{ESC}[0m'
+def bold():       return f'{ESC}[1m'
+def dim():        return f'{ESC}[2m'
+def blink():      return f'{ESC}[5m'
+def rgb(r,g,b):   return f'{ESC}[38;2;{r};{g};{b}m'
+def bgrgb(r,g,b): return f'{ESC}[48;2;{r};{g};{b}m'
+def clrline():    return f'{ESC}[2K'
+
+import re
+def strip(s):     return re.sub(r'\x1b\[[0-9;]*m', '', s)
+
+def vlen(s):      return len(strip(s))
+
+def pad(s, w):
+    v = vlen(s)
+    return s + ' ' * max(0, w - v)
+
+def gradient(text, r1,g1,b1, r2,g2,b2):
+    n = max(len(text)-1, 1)
+    out = []
+    for i, ch in enumerate(text):
+        t = i/n
+        out.append(f'{rgb(int(r1+(r2-r1)*t), int(g1+(g2-g1)*t), int(b1+(b2-b1)*t))}{ch}')
+    return ''.join(out) + rst()
+
+def bar(pct, w=20, fc=(200,255,0), ec=(25,25,25)):
+    f = int(pct*w/100)
+    return rgb(*fc)+'█'*f + rst() + rgb(*ec)+'░'*(w-f)+rst()
+
+def sparkline(data, w=30):
+    chars = '▁▂▃▄▅▆▇█'
+    if not data: return dim()+'─'*w+rst()
+    window = list(data[-w:])
+    mn, mx = min(window), max(window)
+    rng = mx-mn or 1
+    return ''.join(chars[min(7,int((v-mn)/rng*7.99))] for v in window)
+
+SPIN = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏']
+GLITCH = ['▓','▒','░','█','▄','▀','■','□','▪','▫']
+
+
+# ── Code Rain engine ─────────────────────────────────────────────────────────
+
+class CodeRain:
+    """Samples real code from repos and renders falling columns."""
+
+    def __init__(self, cols, rows):
+        self.cols  = cols
+        self.rows  = rows
+        self.drops = []
+        self.code_chars = []
+        self._load_chars()
+        self._init_drops()
+
+    def _load_chars(self):
+        """Load character pool from actual code files."""
+        chars = set('abcdefghijklmnopqrstuvwxyz0123456789(){}[];:=+->.<>/!|&_*%#@')
+        try:
+            paths = []
+            for repo in ['neuralkit','nanohttp','gitlet','tui','kontainer','pipecraft']:
+                p = Path.home() / repo
+                if p.exists():
+                    paths += list(p.rglob('*.py'))[:2] + list(p.rglob('*.js'))[:2]
+            for path in paths[:10]:
+                try:
+                    text = path.read_text(errors='ignore')
+                    chars.update(c for c in text if c.isprintable() and c != ' ')
+                except:
+                    pass
+        except:
+            pass
+        self.code_chars = list(chars)[:80]
+        if not self.code_chars:
+            self.code_chars = list('abcdefghijklmnopqrstuvwxyz0123456789(){}=><;')
+
+    def _init_drops(self):
+        self.drops = []
+        for c in range(self.cols):
+            self.drops.append({
+                'col': c,
+                'row': random.randint(-self.rows, 0),
+                'speed': random.choice([1, 1, 1, 2]),
+                'length': random.randint(4, 14),
+                'chars': [random.choice(self.code_chars) for _ in range(20)],
+                'bright': random.random() > 0.85,
+            })
+
+    def render_cell(self, row, col):
+        """Return ANSI char for (row,col) based on current drop state."""
+        for drop in self.drops:
+            if drop['col'] != col:
+                continue
+            head = drop['row']
+            dist = head - row
+            if dist == 0:
+                # Head of drop — brightest
+                ch = random.choice(drop['chars'])
+                if drop['bright']:
+                    return rgb(255,255,255) + ch + rst()
+                return rgb(200,255,0) + ch + rst()
+            elif 0 < dist <= drop['length']:
+                # Tail — fade to dim
+                fade = 1.0 - dist/drop['length']
+                g    = int(fade * 180)
+                ch   = drop['chars'][dist % len(drop['chars'])]
+                return rgb(0,g,0) + ch + rst()
+        return ' '
+
+    def tick(self):
+        for drop in self.drops:
+            drop['row'] += drop['speed']
+            if drop['row'] - drop['length'] > self.rows:
+                drop['row']   = random.randint(-8, 0)
+                drop['speed'] = random.choice([1,1,1,2])
+                drop['length']= random.randint(4,14)
+                drop['bright']= random.random() > 0.85
+                drop['chars'] = [random.choice(self.code_chars) for _ in range(20)]
+
+    def render_stripe(self, row, col_start, col_end):
+        """Render a horizontal stripe of rain (for background)."""
+        parts = []
+        for c in range(col_start, col_end):
+            parts.append(self.render_cell(row, c))
+        return ''.join(parts)
+
+
+# ── Panel renderer ────────────────────────────────────────────────────────────
+
+class NexusTerminalV2:
+    def __init__(self, brain, rag, neural, security, swarm, vision, github, voice):
+        self.brain    = brain
+        self.rag      = rag
+        self.neural   = neural
+        self.security = security
+        self.swarm    = swarm
+        self.vision   = vision
+        self.github   = github
+        self.voice    = voice
+
+        self.messages   = []
+        self.input_buf  = ''
+        self.tasks      = [
+            {'name':'Ignite Ollama brain',      'pct':0,'done':False},
+            {'name':'Index 9800+ documents',    'pct':0,'done':False},
+            {'name':'Launch neural trainer',    'pct':0,'done':False},
+            {'name':'Spawn agent swarm (5)',    'pct':0,'done':False},
+            {'name':'Open camera vision',       'pct':0,'done':False},
+            {'name':'Connect GitHub feed',      'pct':0,'done':False},
+            {'name':'NEXUS online',             'pct':0,'done':False},
+        ]
+
+        self.spin_idx    = 0
+        self.ai_stream   = False
+        self.cur_resp    = ''
+        self.glitch_mode = False
+        self.glitch_tick = 0
+        self._running    = False
+        self._buf        = []
+        self._rlock      = threading.Lock()
+        self.rain        = None   # initialized after term size known
+        self.rain_tick   = 0
+
+    def w(self, *p):   self._buf.append(''.join(str(x) for x in p))
+    def flush(self):   sys.stdout.write(''.join(self._buf)); sys.stdout.flush(); self._buf.clear()
+
+    # ── Layout ────────────────────────────────────────────────────────────────
+
+    def render(self):
+        with self._rlock:
+            cols, rows = self._size()
+            self._buf.clear()
+            self.w(mv(1,1))
+
+            # Code rain background (only on empty areas)
+            if self.rain and self.rain_tick % 2 == 0:
+                self.rain.tick()
+            self.rain_tick += 1
+
+            self._header(cols, rows)
+            self._layout(cols, rows)
+            self._footer(cols, rows)
+            self.flush()
+        self.spin_idx = (self.spin_idx + 1) % len(SPIN)
+
+    def _size(self):
+        try:
+            s = os.get_terminal_size()
+            return s.columns, s.lines
+        except:
+            return 160, 50
+
+    def _header(self, cols, rows):
+        t = datetime.now().strftime('%H:%M:%S')
+        spin = rgb(200,255,0)+SPIN[self.spin_idx]+rst() if self.ai_stream else rgb(0,80,0)+'●'+rst()
+
+        ollama = rgb(50,255,100)+'●'+rst() if self.brain.ollama.available else rgb(80,80,80)+'○'+rst()
+        docs   = str(self.rag.indexed)
+        agents_alive = sum(1 for a in self.swarm.agents.values() if a.status != 'idle')
+
+        title  = gradient('NEXUS',200,255,0,0,255,200) + dim()+'  //  DOMINION'+rst()
+        right  = f'{spin} {ollama}{dim()} OLLAMA{rst()}  {dim()}DOCS:{rst()}{rgb(200,255,0)}{docs}{rst()}  {dim()}AGENTS:{rst()}{rgb(0,255,180)}{agents_alive}/5{rst()}  {dim()}{t}{rst()}'
+
+        self.w(mv(1,1), bgrgb(2,2,8), ' '*cols, rst())
+        self.w(mv(1,2), title)
+        right_v = vlen(strip(right))+len(right)-len(strip(right))
+        self.w(mv(1, cols-len(strip(right))-1), right, rst())
+        self.w(mv(2,1), rgb(20,20,40)+'─'*cols+rst())
+
+    def _layout(self, cols, rows):
+        body  = rows - 5
+        left  = int(cols * 0.42)
+        mid   = int(cols * 0.30)
+        right = cols - left - mid - 2
+
+        # Rain strips for empty areas
+        rain_col = left + 1
+
+        for r in range(3, 3+body):
+            self.w(mv(r, rain_col), rgb(20,20,20))
+            self.w(mv(r, rain_col+mid+1), rgb(20,20,20))
+
+        # LEFT: AI chat
+        self._panel_chat(3, 1, left, body)
+
+        # Divider 1
+        for r in range(3, 3+body):
+            self.w(mv(r, left+1), rgb(15,30,15)+'│'+rst())
+
+        # MID col: Neural + Agents
+        mid_half = body // 2
+        self._panel_neural(3,        left+2, mid, mid_half)
+        self._panel_agents(3+mid_half, left+2, mid, body-mid_half)
+
+        # Divider 2
+        for r in range(3, 3+body):
+            self.w(mv(r, left+mid+2), rgb(15,30,15)+'│'+rst())
+
+        # RIGHT col: Camera + Security + GitHub + Tasks
+        right_x = left+mid+3
+        q = body // 4
+        self._panel_camera(3,       right_x, right, q+2)
+        self._panel_security(3+q+2,   right_x, right, q)
+        self._panel_github(3+q*2+2,   right_x, right, q)
+        self._panel_tasks(3+q*3+2,    right_x, right, body-q*3-2)
+
+    def _panel_chat(self, row, col, w, h):
+        # Header with gradient
+        streaming = self.ai_stream
+        hdr = gradient('◈ AI BRAIN',200,255,0,0,255,180)
+        mode = (rgb(200,255,0)+SPIN[self.spin_idx]+' STREAMING'+rst()) if streaming else (dim()+'● READY'+rst())
+        self.w(mv(row,col), hdr, dim()+'  '+rst(), mode)
+
+        # Animated border top
+        border_char = GLITCH[self.spin_idx % len(GLITCH)] if streaming else '─'
+        self.w(mv(row+1,col), rgb(0,60,0)+border_char*(w-1)+rst())
+
+        # Messages
+        avail = h - 4
+        lines = []
+        for role, text in self.messages[-14:]:
+            if role == 'user':
+                prefix = rgb(200,255,0)+bold()+'▸ '+rst()
+                col_fn = lambda s: rgb(220,255,100)+s+rst()
+            else:
+                prefix = rgb(0,220,180)+bold()+'⬡ '+rst()
+                col_fn = lambda s: rgb(180,220,200)+s+rst()
+            for i, chunk in enumerate(textwrap.wrap(text, w-4)[:3]):
+                lines.append((prefix if i==0 else '  ', col_fn(chunk)))
+
+        # Streaming response
+        if self.cur_resp:
+            lines.append(('', ''))
+            for i, chunk in enumerate(textwrap.wrap(self.cur_resp, w-4)[-3:]):
+                char = GLITCH[self.spin_idx % len(GLITCH)] if i == 0 else ' '
+                lines.append((rgb(0,200,160)+char+' '+rst(), rgb(150,200,180)+chunk+rst()))
+
+        display = lines[-avail:]
+        for i, (pre, txt) in enumerate(display):
+            self.w(mv(row+2+i, col), ' '*(w-1))
+            self.w(mv(row+2+i, col), pre, txt)
+        for i in range(len(display), avail):
+            self.w(mv(row+2+i, col), ' '*(w-1))
+
+        # Divider
+        self.w(mv(row+h-2, col), rgb(0,40,0)+'─'*(w-1)+rst())
+        # Input line
+        caret = rgb(200,255,0)+'█'+rst() if not streaming else blink()+rgb(0,200,100)+'▮'+rst()
+        disp  = self.input_buf[-(w-8):]
+        self.w(mv(row+h-1,col), rgb(0,100,50)+bold()+'▸ '+rst(), disp, caret, ' '*(max(0,w-len(disp)-5)))
+
+    def _panel_neural(self, row, col, w, h):
+        n = self.neural
+        pulse = '⬡' if n.status == 'training' else ('✓' if n.status == 'done' else '○')
+        col_s = (rgb(170,50,255) if n.status == 'training' else (rgb(50,255,100) if n.status == 'done' else dim))
+
+        self.w(mv(row,col), gradient('◈ NEURAL',170,50,255,100,0,255), dim()+f'  {n.dataset.upper()}  '+rst(), col_s(f'{pulse} {n.status.upper()}'))
+        self.w(mv(row+1,col), rgb(30,15,40)+'─'*(w-1)+rst())
+
+        ep  = int(n.epoch / max(n.max_epoch,1)*100)
+        self.w(mv(row+2,col), dim()+'epoch '+rst(), rgb(200,200,255)+f'{n.epoch:3d}/{n.max_epoch}'+rst(), '  ', bar(ep, min(w-18,16),(170,50,255),(20,10,30)), f' {ep:3d}%')
+
+        lc = (255,80,80) if n.loss>0.3 else (255,180,0) if n.loss>0.05 else (50,255,100)
+        ac = (50,255,100) if n.val_acc>0.9 else (255,200,0)
+        self.w(mv(row+3,col), dim()+'loss '+rst(), rgb(*lc)+f'{n.loss:.4f}'+rst(), dim()+'  acc '+rst(), rgb(*ac)+f'{n.val_acc:.4f}'+rst(), dim()+f'  lr '+rst(), rgb(0,200,255)+f'{n.lr:.2e}'+rst())
+
+        # Layer activity bars
+        self.w(mv(row+4,col), dim()+'layers '+rst())
+        for i, act in enumerate(n.layer_activations[:min(6,w//4)]):
+            c = (int(50+act*120), int(50+act*200), int(act*255))
+            filled = int(act*3)
+            self.w(rgb(*c)+'█'*filled+rst()+dim()+'░'*(3-filled)+rst()+' ')
+
+        if h > 5:
+            self.w(mv(row+5,col), dim()+'loss  '+rst(), rgb(170,50,255), sparkline(n.loss_history, w-8), rst())
+        if h > 6:
+            self.w(mv(row+6,col), dim()+'acc   '+rst(), rgb(50,255,100), sparkline(n.acc_history, w-8), rst())
+
+    def _panel_agents(self, row, col, w, h):
+        self.w(mv(row,col), gradient('◈ AGENT SWARM',255,140,0,255,50,100), dim()+'  5 PARALLEL AIs'+rst())
+        self.w(mv(row+1,col), rgb(40,20,10)+'─'*(w-1)+rst())
+
+        agents = self.swarm.status_snapshot()
+        for i, ag in enumerate(agents[:min(h-3,5)]):
+            r,g,b = ag['color']
+            icon  = ag['icon']
+            name  = ag['name']
+            stat  = ag['status']
+            thought = ag['thought'][:max(w-18,10)]
+
+            # Status dot
+            if stat == 'thinking':
+                sdot = rgb(r,g,b)+SPIN[self.spin_idx]+rst()
+            elif stat == 'done':
+                sdot = rgb(50,255,100)+'✓'+rst()
+            else:
+                sdot = dim()+'○'+rst()
+
+            self.w(mv(row+2+i, col),
+                   sdot, ' ',
+                   rgb(r,g,b)+bold()+f'{icon} {name:<8}'+rst(), ' ',
+                   dim()+thought+rst())
+
+        # Message bus feed
+        recent = self.swarm.bus.recent(1)
+        if recent and h > 8:
+            msg = recent[0]
+            self.w(mv(row+h-1,col), dim()+f'⇝ [{msg.sender}] {msg.content[:w-12]}'+rst())
+
+    def _panel_camera(self, row, col, w, h):
+        frame, faces, fps = self.vision.get_frame()
+        status = self.vision.status
+
+        face_str = (rgb(50,255,100)+f'● {faces} FACE{"S" if faces!=1 else ""}'+rst()) if faces > 0 else dim()+'○ NO FACE'+rst()
+        self.w(mv(row,col), gradient('◈ VISION',255,100,0,255,200,0), dim()+f'  {status.upper()}  '+rst(), face_str, dim()+f'  {fps}fps'+rst())
+        self.w(mv(row+1,col), rgb(40,20,0)+'─'*(w-1)+rst())
+
+        if status == 'live' and frame:
+            for i, line in enumerate(frame[:h-3]):
+                if row+2+i >= row+h: break
+                self.w(mv(row+2+i,col))
+                # Trim to width
+                visible = strip(line)
+                trim_at = min(len(visible), w-1) * 2  # approximate
+                self.w(line[:trim_at*3], rst())  # extra chars for ANSI overhead
+        else:
+            msgs = {
+                'no-opencv':  ['OpenCV not found.','pip3 install opencv-python'],
+                'no-device':  ['Camera not found.','Check /dev/video0'],
+                'off':        ['Vision offline.', 'Camera disabled.'],
+                'connecting': ['Initializing...'],
+            }
+            for i, m in enumerate(msgs.get(status, [status])[:h-3]):
+                self.w(mv(row+2+i,col), dim()+m+rst())
+
+    def _panel_security(self, row, col, w, h):
+        sec = self.security.get_status()
+        thr = sec['threat_lvl']
+        thr_c = rgb(50,255,100) if thr=='LOW' else rgb(255,180,0) if thr=='MED' else rgb(255,50,50)
+
+        self.w(mv(row,col), gradient('◈ SECURITY',255,50,50,255,150,0), dim()+'  THREAT: '+rst(), thr_c+thr+rst())
+        self.w(mv(row+1,col), rgb(40,10,10)+'─'*(w-1)+rst())
+
+        for i, (ip, info) in enumerate(list(sec['devices'].items())[:h-3]):
+            name   = info.get('name','?')[:14]
+            threat = info.get('threat','?')
+            alive  = info.get('alive', True)
+            dot = rgb(50,255,100)+'●'+rst() if alive else dim()+'○'+rst()
+            tc  = rgb(50,255,100) if threat=='SAFE' else rgb(255,180,0) if 'TOKEN' in threat else rgb(255,50,50)
+            self.w(mv(row+2+i,col), dot,' ',dim()+ip[:15].ljust(15)+rst(),' ',dim()+name.ljust(14)+rst(),' ',tc+threat[:10]+rst())
+
+    def _panel_github(self, row, col, w, h):
+        events, stars, last = self.github.get_feed()
+        self.w(mv(row,col), gradient('◈ GITHUB',100,150,255,0,200,255), dim()+f'  HadiKhan777  ★{stars}'+rst())
+        self.w(mv(row+1,col), rgb(10,20,40)+'─'*(w-1)+rst())
+
+        for i, ev in enumerate(events[:h-3]):
+            repo = ev['repo'][:14]
+            age  = ev['age']
+            lang = ev.get('lang','—')[:6]
+            lc   = (0,200,255) if 'Node' in lang or 'JS' in lang else (200,255,0) if 'Py' in lang else (255,140,0)
+            self.w(mv(row+2+i,col),
+                   rgb(*lc)+f'[{lang:<6}]'+rst(), ' ',
+                   rgb(180,210,255)+repo.ljust(14)+rst(), ' ',
+                   dim()+age+rst())
+
+    def _panel_tasks(self, row, col, w, h):
+        self.w(mv(row,col), gradient('◈ BOOT',255,200,0,255,100,0))
+        self.w(mv(row+1,col), rgb(40,30,0)+'─'*(w-1)+rst())
+
+        for i, task in enumerate(self.tasks[:h-3]):
+            if task['done']:
+                ind = rgb(50,255,100)+'✓'+rst()
+                b   = bar(100, min(w-18,12),(50,255,100),(10,30,10))
+            elif task['pct']>0:
+                ind = rgb(255,180,0)+SPIN[self.spin_idx]+rst()
+                b   = bar(task['pct'], min(w-18,12),(255,180,0),(30,20,5))
+            else:
+                ind = dim()+'○'+rst()
+                b   = bar(0, min(w-18,12),(60,60,60),(20,20,20))
+            self.w(mv(row+2+i,col), ind,' ',dim()+task['name'][:w-18]+rst(),' ',b)
+
+    def _footer(self, cols, rows):
+        self.w(mv(rows-2,1), rgb(10,30,10)+'─'*cols+rst())
+        cmds = '  '.join([
+            rgb(200,255,0)+'/swarm'+rst()+dim()+' broadcast to all agents'+rst(),
+            rgb(0,255,180)+'/train'+rst()+dim()+' [dataset]'+rst(),
+            rgb(255,100,0)+'/scan'+rst(),
+            rgb(170,50,255)+'/3d'+rst(),
+            rgb(255,50,100)+'/quit'+rst(),
+        ])
+        self.w(mv(rows-1,1), dim()+'▸ '+rst(), cmds)
+
+    # ── Input ─────────────────────────────────────────────────────────────────
+
+    def handle_key(self, key):
+        if key in ('\r','\n'):
+            self._submit()
+        elif key in ('\x7f','\x08'):
+            self.input_buf = self.input_buf[:-1]
+        elif key == '\x03':
+            return False
+        elif key == '\x15':
+            self.input_buf = ''
+        elif len(key)==1 and ord(key)>=32:
+            self.input_buf += key
+        return True
+
+    def _submit(self):
+        text = self.input_buf.strip()
+        if not text: return
+        self.input_buf = ''
+        if text.startswith('/'):
+            self._cmd(text); return
+        self.messages.append(('user', text))
+
+        def stream():
+            self.ai_stream = True
+            self.cur_resp  = ''
+            self.glitch_mode = True
+
+            def tok(t):
+                self.cur_resp += t
+                # Trigger agents based on content
+                if len(self.cur_resp) == len(t):  # first token
+                    self.swarm.dispatch(text)
+
+            self.brain.think(text, tok)
+            full = self.cur_resp
+            self.messages.append(('nexus', full))
+            if self.voice.enabled:
+                self.voice.speak(full[:200])
+            self.cur_resp  = ''
+            self.ai_stream = False
+            self.glitch_mode = False
+
+        threading.Thread(target=stream, daemon=True).start()
+
+    def _cmd(self, cmd):
+        parts = cmd.split()
+        c = parts[0].lower()
+        if c == '/train':
+            ds = parts[1] if len(parts)>1 else 'spiral'
+            self.neural.stop(); time.sleep(0.2); self.neural.start(ds)
+            self.messages.append(('nexus',f'Neural training started: {ds}'))
+        elif c == '/swarm':
+            task = ' '.join(parts[1:]) or 'Analyze current system state and surface insights.'
+            self.swarm.broadcast(task)
+            self.messages.append(('nexus','Dispatched to all 5 agents simultaneously.'))
+        elif c == '/scan':
+            threading.Thread(target=self.security._scan_subnet, daemon=True).start()
+            self.messages.append(('nexus','Network scan initiated.'))
+        elif c == '/3d':
+            import subprocess
+            subprocess.Popen(['xdg-open','http://localhost:8766/brain_3d.html'])
+            self.messages.append(('nexus','3D brain visualization opened.'))
+        elif c == '/voice':
+            self.voice.enabled = not self.voice.enabled
+            self.messages.append(('nexus',f'Voice {"enabled" if self.voice.enabled else "disabled"}.'))
+        elif c == '/clear':
+            self.messages.clear()
+        elif c in ('/quit','/exit'):
+            self._running = False
+        elif c == '/help':
+            self.messages.append(('nexus',
+                '/swarm [task] — broadcast to all 5 agents\n'
+                '/train [spiral|moons|circles|xor]\n'
+                '/scan — rescan network\n/3d — open 3D viz\n'
+                '/voice — toggle voice\n/clear\n/quit'))
+        else:
+            # Route to swarm
+            self.swarm.dispatch(cmd[1:])
+            self.messages.append(('nexus',f'Routed to agent swarm: {cmd}'))
+
+    # ── Main loop ─────────────────────────────────────────────────────────────
+
+    def run(self):
+        import termios, tty
+        cols, rows = self._size()
+        self.rain  = CodeRain(cols, rows)
+
+        sys.stdout.write(alt()+hide())
+        sys.stdout.flush()
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        self._running = True
+
+        try:
+            tty.setraw(fd)
+
+            def render_loop():
+                while self._running:
+                    self.render()
+                    time.sleep(1/20)  # 20fps
+
+            threading.Thread(target=render_loop, daemon=True).start()
+
+            while self._running:
+                try:
+                    key = sys.stdin.read(1)
+                    if not self.handle_key(key): break
+                except: break
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            sys.stdout.write(show()+norm())
+            sys.stdout.flush()
+            print('\nNEXUS DOMINION offline.')
+
+    def update_task(self, idx, pct, done=False):
+        if 0<=idx<len(self.tasks):
+            self.tasks[idx]['pct']  = pct
+            self.tasks[idx]['done'] = done
+
+    def add_message(self, role, text):
+        self.messages.append((role, text))
