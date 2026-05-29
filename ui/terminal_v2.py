@@ -145,7 +145,8 @@ class CodeRain:
 # ── Panel renderer ────────────────────────────────────────────────────────────
 
 class NexusTerminalV2:
-    def __init__(self, brain, rag, neural, security, swarm, vision, github, voice):
+    def __init__(self, brain, rag, neural, security, swarm, vision, github, voice,
+                 file_watch=None, self_modify=None):
         self.brain    = brain
         self.rag      = rag
         self.neural   = neural
@@ -167,6 +168,8 @@ class NexusTerminalV2:
             {'name':'NEXUS online',             'pct':0,'done':False},
         ]
 
+        self.file_watch  = file_watch
+        self.self_modify = self_modify
         self.spin_idx    = 0
         self.ai_stream   = False
         self.cur_resp    = ''
@@ -255,11 +258,12 @@ class NexusTerminalV2:
 
         # RIGHT col: Camera + Security + GitHub + Tasks
         right_x = left+mid+3
-        q = body // 4
-        self._panel_camera(3,       right_x, right, q+2)
-        self._panel_security(3+q+2,   right_x, right, q)
-        self._panel_github(3+q*2+2,   right_x, right, q)
-        self._panel_tasks(3+q*3+2,    right_x, right, body-q*3-2)
+        q = body // 5
+        self._panel_camera(3,          right_x, right, q+1)
+        self._panel_security(3+q+1,    right_x, right, q)
+        self._panel_github(3+q*2+1,    right_x, right, q)
+        self._panel_filewatcher(3+q*3+1, right_x, right, q)
+        self._panel_tasks(3+q*4+1,     right_x, right, body-q*4-1)
 
     def _panel_chat(self, row, col, w, h):
         # Header with gradient
@@ -309,7 +313,9 @@ class NexusTerminalV2:
     def _panel_neural(self, row, col, w, h):
         n = self.neural
         pulse = '⬡' if n.status == 'training' else ('✓' if n.status == 'done' else '○')
-        col_s = (rgb(170,50,255) if n.status == 'training' else (rgb(50,255,100) if n.status == 'done' else dim))
+        col_s = (lambda s: rgb(170,50,255)+s+rst()) if n.status == 'training' else \
+                (lambda s: rgb(50,255,100)+s+rst()) if n.status == 'done' else \
+                (lambda s: dim()+s+rst())
 
         self.w(mv(row,col), gradient('◈ NEURAL',170,50,255,100,0,255), dim()+f'  {n.dataset.upper()}  '+rst(), col_s(f'{pulse} {n.status.upper()}'))
         self.w(mv(row+1,col), rgb(30,15,40)+'─'*(w-1)+rst())
@@ -408,18 +414,39 @@ class NexusTerminalV2:
 
     def _panel_github(self, row, col, w, h):
         events, stars, last = self.github.get_feed()
-        self.w(mv(row,col), gradient('◈ GITHUB',100,150,255,0,200,255), dim()+f'  HadiKhan777  ★{stars}'+rst())
+        self.w(mv(row,col), gradient('◈ GITHUB',100,150,255,0,200,255),
+               dim()+f'  HadiKhan777  '+rst(), rgb(255,220,0)+f'★{stars}'+rst())
         self.w(mv(row+1,col), rgb(10,20,40)+'─'*(w-1)+rst())
 
         for i, ev in enumerate(events[:h-3]):
-            repo = ev['repo'][:14]
+            repo = ev['repo'][:12]
             age  = ev['age']
-            lang = ev.get('lang','—')[:6]
-            lc   = (0,200,255) if 'Node' in lang or 'JS' in lang else (200,255,0) if 'Py' in lang else (255,140,0)
+            lang = ev.get('lang','—')[:5]
+            lc   = (0,200,255) if lang in ('JavaS','Node.') else (200,255,0) if lang=='Pytho' else (255,140,0)
             self.w(mv(row+2+i,col),
-                   rgb(*lc)+f'[{lang:<6}]'+rst(), ' ',
-                   rgb(180,210,255)+repo.ljust(14)+rst(), ' ',
+                   rgb(*lc)+f'{lang:<5}'+rst(), ' ',
+                   rgb(180,210,255)+repo.ljust(12)+rst(), ' ',
                    dim()+age+rst())
+
+    def _panel_filewatcher(self, row, col, w, h):
+        events = self.file_watch.recent(h-3) if self.file_watch else []
+        self.w(mv(row,col), gradient('◈ LIVE FILES',0,200,255,0,255,150),
+               dim()+f'  watching {len(self.file_watch.watching if self.file_watch else [])} repos'+rst())
+        self.w(mv(row+1,col), rgb(0,30,30)+'─'*(w-1)+rst())
+
+        if not events:
+            self.w(mv(row+2,col), dim()+'No changes detected yet...'+rst())
+            return
+
+        ext_colors = {'.py':(200,255,0),'.js':(255,220,0),'.ts':(0,150,255),
+                      '.rs':(255,100,0),'.md':(150,150,255),'.html':(255,80,80)}
+        for i, ev in enumerate(events[:h-3]):
+            ec  = ext_colors.get(ev['ext'], (150,150,150))
+            self.w(mv(row+2+i,col),
+                   rgb(*ec)+ev['ext'][1:].upper().ljust(3)+rst(), ' ',
+                   rgb(0,200,180)+ev['repo'][:8].ljust(8)+rst(), ' ',
+                   dim()+ev['file'][:w-18]+rst(), ' ',
+                   rgb(80,80,80)+ev['time']+rst())
 
     def _panel_tasks(self, row, col, w, h):
         self.w(mv(row,col), gradient('◈ BOOT',255,200,0,255,100,0))
@@ -439,13 +466,17 @@ class NexusTerminalV2:
 
     def _footer(self, cols, rows):
         self.w(mv(rows-2,1), rgb(10,30,10)+'─'*cols+rst())
-        cmds = '  '.join([
-            rgb(200,255,0)+'/swarm'+rst()+dim()+' broadcast to all agents'+rst(),
-            rgb(0,255,180)+'/train'+rst()+dim()+' [dataset]'+rst(),
-            rgb(255,100,0)+'/scan'+rst(),
-            rgb(170,50,255)+'/3d'+rst(),
-            rgb(255,50,100)+'/quit'+rst(),
-        ])
+        pairs = [
+            (rgb(200,255,0),   '/swarm',   ' all agents'),
+            (rgb(0,255,180),   '/train',   ' dataset'),
+            (rgb(0,200,255),   '/search',  ' web'),
+            (rgb(255,180,0),   '/agent',   ' NAME task'),
+            (rgb(170,50,255),  '/evolve',  ' self-modify'),
+            (rgb(255,100,0),   '/camera',  ' toggle'),
+            (rgb(100,150,255), '/3d',      ''),
+            (rgb(255,50,100),  '/quit',    ''),
+        ]
+        cmds = '  '.join(c+k+rst()+dim()+v+rst() for c,k,v in pairs)
         self.w(mv(rows-1,1), dim()+'▸ '+rst(), cmds)
 
     # ── Input ─────────────────────────────────────────────────────────────────
@@ -496,38 +527,107 @@ class NexusTerminalV2:
     def _cmd(self, cmd):
         parts = cmd.split()
         c = parts[0].lower()
+
         if c == '/train':
             ds = parts[1] if len(parts)>1 else 'spiral'
             self.neural.stop(); time.sleep(0.2); self.neural.start(ds)
-            self.messages.append(('nexus',f'Neural training started: {ds}'))
+            self.messages.append(('nexus',f'Neural training restarted: {ds}'))
+
         elif c == '/swarm':
             task = ' '.join(parts[1:]) or 'Analyze current system state and surface insights.'
             self.swarm.broadcast(task)
-            self.messages.append(('nexus','Dispatched to all 5 agents simultaneously.'))
+            self.messages.append(('nexus',f'Broadcast to all 5 agents: "{task[:60]}"'))
+
         elif c == '/scan':
             threading.Thread(target=self.security._scan_subnet, daemon=True).start()
             self.messages.append(('nexus','Network scan initiated.'))
+
+        elif c == '/search':
+            query = ' '.join(parts[1:])
+            if not query:
+                self.messages.append(('nexus','Usage: /search <query>'))
+            else:
+                def do_search():
+                    from brain.websearch import search, format_for_llm
+                    self.ai_stream = True
+                    results = search(query)
+                    summary = format_for_llm(query, results)
+                    self.messages.append(('nexus', summary))
+                    self.ai_stream = False
+                threading.Thread(target=do_search, daemon=True).start()
+                self.messages.append(('nexus', f'Searching: "{query}"...'))
+
+        elif c == '/camera':
+            if self.vision.status in ('live',):
+                self.vision.stop()
+                self.messages.append(('nexus','Camera disabled.'))
+            else:
+                self.vision.start()
+                self.messages.append(('nexus','Camera enabled. Opening /dev/video0...'))
+
+        elif c == '/evolve':
+            def do_evolve():
+                self.ai_stream = True
+                self.cur_resp  = ''
+                def tok(t): self.cur_resp += t
+                self.self_modify.analyze_self(tok)
+                full = self.cur_resp
+                self.messages.append(('nexus', f'[SELF-ANALYSIS]\n{full}'))
+                self.cur_resp = ''
+                self.ai_stream = False
+            threading.Thread(target=do_evolve, daemon=True).start()
+            self.messages.append(('nexus', 'Analyzing own source code for improvements...'))
+
+        elif c == '/diff':
+            diff = self.self_modify.git_diff()
+            self.messages.append(('nexus', f'[GIT DIFF]\n{diff}'))
+
         elif c == '/3d':
             import subprocess
             subprocess.Popen(['xdg-open','http://localhost:8766/brain_3d.html'])
             self.messages.append(('nexus','3D brain visualization opened.'))
+
         elif c == '/voice':
             self.voice.enabled = not self.voice.enabled
-            self.messages.append(('nexus',f'Voice {"enabled" if self.voice.enabled else "disabled"}.'))
+            self.messages.append(('nexus',f'Voice {"ON" if self.voice.enabled else "OFF"}.'))
+
+        elif c == '/agent':
+            # Route to a specific agent: /agent CODER write a fibonacci function
+            if len(parts) > 2:
+                target = parts[1].upper()
+                task   = ' '.join(parts[2:])
+                self.swarm.dispatch(task, target=target)
+                self.messages.append(('nexus', f'Task sent to {target}: {task[:60]}'))
+            else:
+                agents = ', '.join(self.swarm.agents.keys())
+                self.messages.append(('nexus', f'Agents: {agents}\nUsage: /agent <NAME> <task>'))
+
         elif c == '/clear':
             self.messages.clear()
-        elif c in ('/quit','/exit'):
+
+        elif c in ('/quit','/exit','/q'):
             self._running = False
+
         elif c == '/help':
             self.messages.append(('nexus',
-                '/swarm [task] — broadcast to all 5 agents\n'
-                '/train [spiral|moons|circles|xor]\n'
-                '/scan — rescan network\n/3d — open 3D viz\n'
-                '/voice — toggle voice\n/clear\n/quit'))
+                'NEXUS COMMANDS\n'
+                '──────────────────────────────\n'
+                '/swarm [task]         broadcast to all 5 agents\n'
+                '/agent NAME task      send to specific agent\n'
+                '/train [dataset]      spiral|moons|circles|xor\n'
+                '/search <query>       web search via DuckDuckGo\n'
+                '/evolve               self-analyze & improve\n'
+                '/diff                 show own git changes\n'
+                '/camera               toggle camera vision\n'
+                '/voice                toggle voice (espeak)\n'
+                '/scan                 rescan network\n'
+                '/3d                   open 3D brain viz\n'
+                '/clear  /quit'
+            ))
         else:
-            # Route to swarm
+            # Smart route to swarm
             self.swarm.dispatch(cmd[1:])
-            self.messages.append(('nexus',f'Routed to agent swarm: {cmd}'))
+            self.messages.append(('nexus',f'Routed to swarm: {cmd}'))
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 

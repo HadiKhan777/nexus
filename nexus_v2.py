@@ -23,7 +23,7 @@ def boot(ui):
         (1, lambda: ui.rag.index_all(),            'Indexing 9800+ documents'),
         (2, lambda: ui.neural.start('spiral'),     'Neural trainer'),
         (3, lambda: ui.swarm.start(),              'Agent swarm (5 AIs)'),
-        (4, lambda: ui.vision.start(),             'Camera vision'),
+        (4, lambda: None,                           'Camera vision (type /camera to enable)'),
         (5, lambda: ui.github.start(),             'GitHub feed'),
         (6, lambda: None,                          'All systems online'),
     ]
@@ -58,29 +58,36 @@ def main():
     print('\x1b[2m  Initializing...\x1b[0m')
     time.sleep(1.8)
 
-    from brain.rag         import RAGEngine
-    from brain.core        import Brain
-    from brain.swarm       import AgentSwarm
-    from brain.voice       import VoiceEngine
-    from brain.vision      import VisionWorker
-    from brain.github_feed import GitHubFeed
+    from brain.rag          import RAGEngine
+    from brain.core         import Brain
+    from brain.swarm        import AgentSwarm
+    from brain.voice        import VoiceEngine
+    from brain.vision       import VisionWorker
+    from brain.github_feed  import GitHubFeed
+    from brain.self_modify  import SelfModifyEngine
     from workers.neural_worker   import NeuralWorker
     from workers.security_worker import SecurityWorker
-    from ui.terminal_v2    import NexusTerminalV2
-    from web.server        import NexusWSServer, start_http
+    from workers.file_watcher    import FileWatcher
+    from ui.terminal_v2     import NexusTerminalV2
+    from web.server         import NexusWSServer, start_http
 
     rag      = RAGEngine()
     neural   = NeuralWorker()
     security = SecurityWorker()
     security.start()
 
-    brain    = Brain(rag)
-    swarm    = AgentSwarm(rag, brain.ollama)
-    voice    = VoiceEngine()
-    vision   = VisionWorker(device=0, width=36, height=12)
-    github   = GitHubFeed('HadiKhan777')
+    brain       = Brain(rag)
+    swarm       = AgentSwarm(rag, brain.ollama)
+    voice       = VoiceEngine()
+    vision      = VisionWorker(device=0, width=36, height=12)
+    # Camera is OFF by default — user enables with /camera
+    github      = GitHubFeed('HadiKhan777')
+    file_watch  = FileWatcher()
+    file_watch.start()
 
-    ui = NexusTerminalV2(brain, rag, neural, security, swarm, vision, github, voice)
+    self_mod = SelfModifyEngine(brain)
+    ui = NexusTerminalV2(brain, rag, neural, security, swarm, vision, github, voice,
+                         file_watch=file_watch, self_modify=self_mod)
 
     # WebSocket bridge for 3D viz
     ws = NexusWSServer(neural, security, brain)

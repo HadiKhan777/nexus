@@ -32,7 +32,7 @@ class NexusWSServer:
 
     async def _serve(self):
         import websockets
-        async def handler(ws, path=None):
+        async def handler(ws, path=None):  # noqa
             self.clients.add(ws)
             try:
                 async for msg in ws:
@@ -56,7 +56,7 @@ class NexusWSServer:
                     self.clients -= dead
                 await asyncio.sleep(0.1)  # 10fps
 
-        async with websockets.serve(handler, 'localhost', self.port):
+        async with websockets.serve(handler, 'localhost', self.port, reuse_port=True):
             await broadcaster()
 
     def _get_state(self):
@@ -93,11 +93,17 @@ def start_http(port=8766):
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=str(web_dir), **kw)
-        def log_message(self, *a): pass  # silence
+        def log_message(self, *a): pass
+
+    class ReuseTCPServer(socketserver.TCPServer):
+        allow_reuse_address = True
 
     def _serve():
-        with socketserver.TCPServer(('', port), Handler) as srv:
-            srv.serve_forever()
+        try:
+            with ReuseTCPServer(('', port), Handler) as srv:
+                srv.serve_forever()
+        except Exception:
+            pass
 
     t = threading.Thread(target=_serve, daemon=True)
     t.start()
