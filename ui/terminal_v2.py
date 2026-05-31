@@ -301,13 +301,13 @@ class NexusTerminalV2:
             else:
                 prefix = rgb(0,220,180)+bold()+'⬡ '+rst()
                 col_fn = lambda s: rgb(180,220,200)+s+rst()
-            for i, chunk in enumerate(textwrap.wrap(text, w-4)[:3]):
+            for i, chunk in enumerate(textwrap.wrap(text, w-4)[:8]):
                 lines.append((prefix if i==0 else '  ', col_fn(chunk)))
 
         # Streaming response
         if self.cur_resp:
             lines.append(('', ''))
-            for i, chunk in enumerate(textwrap.wrap(self.cur_resp, w-4)[-3:]):
+            for i, chunk in enumerate(textwrap.wrap(self.cur_resp, w-4)[-6:]):
                 char = GLITCH[self.spin_idx % len(GLITCH)] if i == 0 else ' '
                 lines.append((rgb(0,200,160)+char+' '+rst(), rgb(180,230,200)+chunk+rst()))
 

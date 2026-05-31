@@ -115,13 +115,14 @@ class CodeExecutor:
 
 
 class Brain:
-    def __init__(self, rag, status_cb=None, memory=None, provider=None):
+    def __init__(self, rag, status_cb=None, memory=None, provider=None, chat_log=None):
         self.rag      = rag
-        self.ollama   = OllamaClient()           # kept for compatibility checks
-        self.provider = provider or self.ollama  # what actually handles chat
+        self.ollama   = OllamaClient()
+        self.provider = provider or self.ollama
         self.executor = CodeExecutor()
         self.status   = status_cb or (lambda s: None)
         self.memory   = memory
+        self.chat_log = chat_log   # ObsidianChatLogger
         self.history  = list(memory.recent_conversation(8)) if memory else []
         self._lock    = threading.Lock()
 
@@ -141,6 +142,8 @@ class Brain:
             self.history.append(('user', user_input))
         if self.memory:
             self.memory.add_message('user', user_input)
+        if self.chat_log:
+            self.chat_log.log('user', user_input)
 
         full_response = []
         def collect(tok):
@@ -154,6 +157,8 @@ class Brain:
             self.history.append(('nexus', response_text[:500]))
         if self.memory:
             self.memory.add_message('nexus', response_text[:500])
+        if self.chat_log:
+            self.chat_log.log('nexus', response_text)
 
         # Auto-execute if code block detected
         if '```python' in response_text and '/norun' not in user_input:

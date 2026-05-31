@@ -47,6 +47,8 @@ class RAGEngine:
             (Path.home() / 'portfolio',  'readme',    ['*.md']),
             (Path.home() / 'Downloads',  'cv',        ['*CV*.docx', '*CV*.pdf']),
             (Path.home() / 'claude-wiki' / 'wiki', 'wiki', ['*.md']),
+        (Path.home() / 'claude-wiki' / 'wiki' / 'sessions', 'chat-history', ['*.md']),
+        (Path.home() / 'claude-wiki' / 'wiki' / 'agents',   'agent-log',    ['*.md']),
         ]
 
         paths = []
