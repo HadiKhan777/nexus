@@ -78,8 +78,13 @@ def main():
 
     from brain.memory import Memory
     memory      = Memory()
+    from brain.providers      import build_providers
+    from brain.obsidian_writer import ObsidianWriter
+    providers   = build_providers()
+    obs_writer  = ObsidianWriter()
     brain       = Brain(rag, memory=memory)
-    swarm       = AgentSwarm(rag, brain.ollama)
+    swarm       = AgentSwarm(rag, brain.ollama,
+                             providers=providers, obs_writer=obs_writer)
     voice       = VoiceEngine()
     vision      = VisionWorker(device=0, width=36, height=12)
     # Camera is OFF by default — user enables with /camera

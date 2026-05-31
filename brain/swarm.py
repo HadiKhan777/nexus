@@ -5,6 +5,7 @@ They share a message bus and can delegate to each other.
 """
 
 import threading, queue, time, json, requests
+from brain.obsidian_writer import ObsidianWriter
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -82,12 +83,14 @@ AGENT_DEFS = {
 
 
 class Agent:
-    def __init__(self, name, config, bus, rag, ollama):
-        self.name    = name
-        self.config  = config
-        self.bus     = bus
-        self.rag     = rag
-        self.ollama  = ollama
+    def __init__(self, name, config, bus, rag, ollama, provider=None, obs_writer=None):
+        self.name       = name
+        self.config     = config
+        self.bus        = bus
+        self.rag        = rag
+        self.ollama     = ollama
+        self.provider   = provider or ollama
+        self.obs_writer = obs_writer
 
         self.status  = 'idle'
         self.thought = 'Initializing...'
@@ -145,7 +148,8 @@ class Agent:
             result.append(t)
             self.thought = ''.join(result)[-80:]
 
-        self.ollama.stream(prompt, system=self.config['system'], on_token=tok)
+        pname = getattr(self.provider, 'name', 'Ollama')
+        self.provider.stream(prompt, system=self.config['system'], on_token=tok)
 
         full = ''.join(result)
         self.history.append(('task', task))
@@ -153,10 +157,12 @@ class Agent:
         self.status  = 'done'
         self.thought = full[:100] + ('...' if len(full) > 100 else '')
 
-        # Broadcast result
+        if self.obs_writer and full.strip():
+            self.obs_writer.log_finding(self.name, pname, self.task, full)
+
         self.bus.send(AgentMessage(
             sender=self.name, target='broadcast',
-            content=f'[{self.name}] {full[:200]}', mtype='result'
+            content=f'[{self.name}/{pname}] {full[:200]}', mtype='result'
         ))
         time.sleep(2)
         self.status = 'idle'
@@ -165,13 +171,31 @@ class Agent:
         self._handle_task(self.config['idle_task'])
 
 
+# Provider assignment per agent — best available provider for each specialty
+AGENT_PROVIDERS = {
+    'CODER':     ['deepseek', 'openai', 'ollama'],   # DeepSeek is best at code
+    'TRAINER':   ['ollama', 'deepseek', 'openai'],   # local ML monitoring
+    'GUARDIAN':  ['kimi', 'openai', 'ollama'],        # Kimi good at analysis
+    'ORACLE':    ['gemini', 'anthropic', 'ollama'],   # Gemini for knowledge
+    'ARCHITECT': ['openai', 'anthropic', 'ollama'],   # GPT-4 for system design
+}
+
+
 class AgentSwarm:
-    def __init__(self, rag, ollama):
-        self.bus    = MessageBus()
-        self.agents = {
-            name: Agent(name, cfg, self.bus, rag, ollama)
-            for name, cfg in AGENT_DEFS.items()
-        }
+    def __init__(self, rag, ollama, providers=None, obs_writer=None):
+        self.bus        = MessageBus()
+        self.providers  = providers or {}
+        self.obs_writer = obs_writer or ObsidianWriter()
+
+        from brain.providers import best_available
+        self.agents = {}
+        for name, cfg in AGENT_DEFS.items():
+            preferred = AGENT_PROVIDERS.get(name, ['ollama'])
+            provider  = best_available(self.providers, preferred) if self.providers else ollama
+            self.agents[name] = Agent(
+                name, cfg, self.bus, rag, ollama,
+                provider=provider, obs_writer=self.obs_writer
+            )
 
     def start(self):
         for agent in self.agents.values():
