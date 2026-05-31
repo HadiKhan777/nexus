@@ -204,15 +204,20 @@ class NexusTerminalV2:
         self.spin_idx = (self.spin_idx + 1) % len(SPIN)
 
     def _size(self):
-        for _ in range(10):
-            try:
-                s = os.get_terminal_size()
+        import shutil
+        # Try /dev/tty first (works even when stdin is redirected)
+        try:
+            with open('/dev/tty') as tty:
+                s = os.get_terminal_size(tty.fileno())
                 if s.columns > 20 and s.lines > 10:
                     return s.columns, s.lines
-            except:
-                pass
-            time.sleep(0.1)
-        return 160, 50
+        except:
+            pass
+        # shutil checks COLUMNS/LINES env vars then stdout/stderr
+        s = shutil.get_terminal_size(fallback=(180, 50))
+        if s.columns > 20 and s.lines > 10:
+            return s.columns, s.lines
+        return 180, 50
 
     def _header(self, cols, rows):
         t = datetime.now().strftime('%H:%M:%S')
@@ -637,18 +642,21 @@ class NexusTerminalV2:
 
         LOG = open('/tmp/nexus_debug.log', 'w')
 
+        # Open /dev/tty directly so NEXUS works regardless of how it's launched
+        tty_file = open('/dev/tty', 'r+b', buffering=0)
+        tty_fd   = tty_file.fileno()
+
         cols, rows = self._size()
         LOG.write(f'Terminal size: {cols}x{rows}\n'); LOG.flush()
         self.rain  = CodeRain(cols, rows)
 
         sys.stdout.write(alt()+hide())
         sys.stdout.flush()
-        fd  = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
+        old = termios.tcgetattr(tty_fd)
         self._running = True
 
         try:
-            tty.setraw(fd)
+            tty.setraw(tty_fd)
 
             def render_loop():
                 time.sleep(0.3)   # let terminal settle after setraw
@@ -670,7 +678,7 @@ class NexusTerminalV2:
 
             while self._running:
                 try:
-                    key = sys.stdin.read(1)
+                    key = os.read(tty_fd, 1).decode('utf-8', errors='ignore')
                     if not self.handle_key(key):
                         break
                 except KeyboardInterrupt:
@@ -679,7 +687,8 @@ class NexusTerminalV2:
                     LOG.write(f'Input error: {ex}\n'); LOG.flush()
         finally:
             self._running = False
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            termios.tcsetattr(tty_fd, termios.TCSADRAIN, old)
+            tty_file.close()
             sys.stdout.write(show()+norm())
             sys.stdout.flush()
             LOG.write('NEXUS exited cleanly\n'); LOG.close()
