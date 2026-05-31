@@ -214,31 +214,27 @@ class NexusTerminalV2:
         t = datetime.now().strftime('%H:%M:%S')
         spin = rgb(200,255,0)+SPIN[self.spin_idx]+rst() if self.ai_stream else rgb(0,80,0)+'●'+rst()
 
-        ollama = rgb(50,255,100)+'●'+rst() if self.brain.ollama.available else rgb(80,80,80)+'○'+rst()
-        docs   = str(self.rag.indexed)
+        ollama       = rgb(50,255,100)+'●'+rst() if self.brain.ollama.available else rgb(80,80,80)+'○'+rst()
+        docs         = str(self.rag.indexed)
         agents_alive = sum(1 for a in self.swarm.agents.values() if a.status != 'idle')
 
-        title  = gradient('NEXUS',200,255,0,0,255,200) + dim()+'  //  DOMINION'+rst()
-        right  = f'{spin} {ollama}{dim()} OLLAMA{rst()}  {dim()}DOCS:{rst()}{rgb(200,255,0)}{docs}{rst()}  {dim()}AGENTS:{rst()}{rgb(0,255,180)}{agents_alive}/5{rst()}  {dim()}{t}{rst()}'
+        title = gradient('NEXUS',200,255,0,0,255,200) + dim()+'  //  DOMINION'+rst()
+
+        # Build right side as plain text first to measure, then color
+        right_plain = f'● OLLAMA  DOCS:{docs}  AGENTS:{agents_alive}/5  {t}'
+        right_col   = max(1, cols - len(right_plain) - 2)
+        right_full  = f'{spin} {ollama}{dim()} OLLAMA{rst()}  {dim()}DOCS:{rst()}{rgb(200,255,0)}{docs}{rst()}  {dim()}AGENTS:{rst()}{rgb(0,255,180)}{agents_alive}/5{rst()}  {dim()}{t}{rst()}'
 
         self.w(mv(1,1), bgrgb(2,2,8), ' '*cols, rst())
         self.w(mv(1,2), title)
-        right_v = vlen(strip(right))+len(right)-len(strip(right))
-        self.w(mv(1, cols-len(strip(right))-1), right, rst())
+        self.w(mv(1, right_col), right_full, rst())
         self.w(mv(2,1), rgb(20,20,40)+'─'*cols+rst())
 
     def _layout(self, cols, rows):
-        body  = rows - 5
-        left  = int(cols * 0.42)
-        mid   = int(cols * 0.30)
-        right = cols - left - mid - 2
-
-        # Rain strips for empty areas
-        rain_col = left + 1
-
-        for r in range(3, 3+body):
-            self.w(mv(r, rain_col), rgb(20,20,20))
-            self.w(mv(r, rain_col+mid+1), rgb(20,20,20))
+        body  = max(10, rows - 5)
+        left  = max(30, int(cols * 0.42))
+        mid   = max(20, int(cols * 0.30))
+        right = max(15, cols - left - mid - 2)
 
         # LEFT: AI chat
         self._panel_chat(3, 1, left, body)
@@ -249,21 +245,21 @@ class NexusTerminalV2:
 
         # MID col: Neural + Agents
         mid_half = body // 2
-        self._panel_neural(3,        left+2, mid, mid_half)
-        self._panel_agents(3+mid_half, left+2, mid, body-mid_half)
+        self._panel_neural(3,           left+2, mid, mid_half)
+        self._panel_agents(3+mid_half,  left+2, mid, body-mid_half)
 
         # Divider 2
         for r in range(3, 3+body):
             self.w(mv(r, left+mid+2), rgb(15,30,15)+'│'+rst())
 
-        # RIGHT col: Camera + Security + GitHub + Tasks
+        # RIGHT col: 5 panels
         right_x = left+mid+3
-        q = body // 5
-        self._panel_camera(3,          right_x, right, q+1)
-        self._panel_security(3+q+1,    right_x, right, q)
-        self._panel_github(3+q*2+1,    right_x, right, q)
-        self._panel_filewatcher(3+q*3+1, right_x, right, q)
-        self._panel_tasks(3+q*4+1,     right_x, right, body-q*4-1)
+        q = max(3, body // 5)
+        self._panel_camera(      3,         right_x, right, q+1)
+        self._panel_security(    3+q+1,     right_x, right, q)
+        self._panel_github(      3+q*2+1,   right_x, right, q)
+        self._panel_filewatcher( 3+q*3+1,   right_x, right, q)
+        self._panel_tasks(       3+q*4+1,   right_x, right, max(3, body-q*4-1))
 
     def _panel_chat(self, row, col, w, h):
         # Header with gradient
@@ -465,7 +461,7 @@ class NexusTerminalV2:
             self.w(mv(row+2+i,col), ind,' ',dim()+task['name'][:w-18]+rst(),' ',b)
 
     def _footer(self, cols, rows):
-        self.w(mv(rows-2,1), rgb(10,30,10)+'─'*cols+rst())
+        self.w(mv(max(3,rows-2),1), rgb(10,30,10)+'─'*cols+rst())
         pairs = [
             (rgb(200,255,0),   '/swarm',   ' all agents'),
             (rgb(0,255,180),   '/train',   ' dataset'),
@@ -477,7 +473,7 @@ class NexusTerminalV2:
             (rgb(255,50,100),  '/quit',    ''),
         ]
         cmds = '  '.join(c+k+rst()+dim()+v+rst() for c,k,v in pairs)
-        self.w(mv(rows-1,1), dim()+'▸ '+rst(), cmds)
+        self.w(mv(max(4,rows-1),1), dim()+'▸ '+rst(), cmds)
 
     # ── Input ─────────────────────────────────────────────────────────────────
 
@@ -633,12 +629,17 @@ class NexusTerminalV2:
 
     def run(self):
         import termios, tty
+        import traceback
+
+        LOG = open('/tmp/nexus_debug.log', 'w')
+
         cols, rows = self._size()
+        LOG.write(f'Terminal size: {cols}x{rows}\n'); LOG.flush()
         self.rain  = CodeRain(cols, rows)
 
         sys.stdout.write(alt()+hide())
         sys.stdout.flush()
-        fd = sys.stdin.fileno()
+        fd  = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         self._running = True
 
@@ -646,21 +647,37 @@ class NexusTerminalV2:
             tty.setraw(fd)
 
             def render_loop():
+                err_count = 0
                 while self._running:
-                    self.render()
-                    time.sleep(1/20)  # 20fps
+                    try:
+                        self.render()
+                    except Exception as ex:
+                        err_count += 1
+                        LOG.write(f'Render error #{err_count}: {ex}\n{traceback.format_exc()}\n')
+                        LOG.flush()
+                        if err_count > 10:
+                            self._running = False
+                            break
+                    time.sleep(1/20)
 
             threading.Thread(target=render_loop, daemon=True).start()
+            LOG.write('Render loop started\n'); LOG.flush()
 
             while self._running:
                 try:
                     key = sys.stdin.read(1)
-                    if not self.handle_key(key): break
-                except: break
+                    if not self.handle_key(key):
+                        break
+                except KeyboardInterrupt:
+                    break
+                except Exception as ex:
+                    LOG.write(f'Input error: {ex}\n'); LOG.flush()
         finally:
+            self._running = False
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
             sys.stdout.write(show()+norm())
             sys.stdout.flush()
+            LOG.write('NEXUS exited cleanly\n'); LOG.close()
             print('\nNEXUS DOMINION offline.')
 
     def update_task(self, idx, pct, done=False):
