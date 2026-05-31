@@ -134,11 +134,27 @@ class GeminiProvider(BaseProvider):
     name = 'Gemini'
 
     def __init__(self, cfg):
-        self.api_key = cfg.get('api_key', '')
-        self.model   = cfg.get('model', 'gemini-1.5-flash')
+        self.api_key  = cfg.get('api_key', '')
+        self.model    = cfg.get('model', 'gemini-1.5-flash')
+        self._avail   = None   # cached result
 
     def available(self):
-        return bool(self.api_key and len(self.api_key) > 10)
+        if not self.api_key or len(self.api_key) < 10:
+            return False
+        if self._avail is not None:
+            return self._avail
+        try:
+            import requests as _r
+            url = (f'https://generativelanguage.googleapis.com/v1beta/models/'
+                   f'{self.model}:generateContent?key={self.api_key}')
+            r = _r.post(url,
+                json={'contents':[{'parts':[{'text':'hi'}]}],
+                      'generationConfig':{'maxOutputTokens':4}},
+                timeout=5)
+            self._avail = r.status_code == 200
+        except Exception:
+            self._avail = False
+        return self._avail
 
     def stream(self, prompt, system='', on_token=None):
         url = (f'https://generativelanguage.googleapis.com/v1beta/models/'
