@@ -146,7 +146,7 @@ class CodeRain:
 
 class NexusTerminalV2:
     def __init__(self, brain, rag, neural, security, swarm, vision, github, voice,
-                 file_watch=None, self_modify=None):
+                 file_watch=None, self_modify=None, memory=None):
         self.brain    = brain
         self.rag      = rag
         self.neural   = neural
@@ -170,6 +170,7 @@ class NexusTerminalV2:
 
         self.file_watch  = file_watch
         self.self_modify = self_modify
+        self.memory      = memory
         self.spin_idx    = 0
         self.ai_stream   = False
         self.cur_resp    = ''
@@ -180,6 +181,14 @@ class NexusTerminalV2:
         self._rlock      = threading.Lock()
         self.rain        = None   # initialized after term size known
         self.rain_tick   = 0
+        # Command history recall (up/down arrows)
+        self.cmd_history = list(memory.command_history()) if memory else []
+        self.hist_idx    = len(self.cmd_history)   # points past the end
+        self.saved_buf   = ''                       # buffer stashed during recall
+        # Tab completion
+        self.COMMANDS = ['/swarm','/consensus','/agent','/train','/search','/remember',
+                         '/recall','/evolve','/diff','/camera','/voice','/scan','/3d',
+                         '/clear','/help','/quit']
 
     def w(self, *p):   self._buf.append(''.join(str(x) for x in p))
     def flush(self):   sys.stdout.write(''.join(self._buf)); sys.stdout.flush(); self._buf.clear()
@@ -487,22 +496,85 @@ class NexusTerminalV2:
     # ── Input ─────────────────────────────────────────────────────────────────
 
     def handle_key(self, key):
+        # ── Escape sequence state machine (arrow keys) ──────────────────────
+        esc = getattr(self, '_esc', '')
+        if esc:
+            esc += key
+            if esc == '\x1b[':
+                self._esc = esc
+                return True
+            if esc.startswith('\x1b['):
+                self._esc = ''
+                if esc == '\x1b[A':   self._history_prev()   # up
+                elif esc == '\x1b[B': self._history_next()   # down
+                # left/right ignored for now
+                return True
+            self._esc = ''
+            return True
+        if key == '\x1b':
+            self._esc = '\x1b'
+            return True
+
+        # ── Normal keys ─────────────────────────────────────────────────────
         if key in ('\r','\n'):
             self._submit()
         elif key in ('\x7f','\x08'):
             self.input_buf = self.input_buf[:-1]
-        elif key == '\x03':
+        elif key == '\x03':                       # Ctrl-C
             return False
-        elif key == '\x15':
+        elif key == '\x15':                       # Ctrl-U clear line
             self.input_buf = ''
+        elif key == '\t':                         # Tab completion
+            self._tab_complete()
         elif len(key)==1 and ord(key)>=32:
             self.input_buf += key
         return True
+
+    def _history_prev(self):
+        if not self.cmd_history:
+            return
+        if self.hist_idx == len(self.cmd_history):
+            self.saved_buf = self.input_buf       # stash what was being typed
+        self.hist_idx = max(0, self.hist_idx - 1)
+        self.input_buf = self.cmd_history[self.hist_idx]
+
+    def _history_next(self):
+        if not self.cmd_history:
+            return
+        if self.hist_idx >= len(self.cmd_history):
+            return
+        self.hist_idx += 1
+        if self.hist_idx == len(self.cmd_history):
+            self.input_buf = self.saved_buf       # restore the in-progress line
+        else:
+            self.input_buf = self.cmd_history[self.hist_idx]
+
+    def _tab_complete(self):
+        buf = self.input_buf
+        if not buf.startswith('/'):
+            return
+        matches = [c for c in self.COMMANDS if c.startswith(buf)]
+        if len(matches) == 1:
+            self.input_buf = matches[0] + ' '
+        elif len(matches) > 1:
+            # Complete to the longest common prefix
+            prefix = matches[0]
+            for m in matches[1:]:
+                while not m.startswith(prefix):
+                    prefix = prefix[:-1]
+            self.input_buf = prefix
+            self.messages.append(('nexus', 'completions: ' + '  '.join(matches)))
 
     def _submit(self):
         text = self.input_buf.strip()
         if not text: return
         self.input_buf = ''
+        # Record to command history (in-RAM + persistent)
+        self.cmd_history.append(text)
+        self.hist_idx = len(self.cmd_history)
+        self.saved_buf = ''
+        if self.memory:
+            self.memory.add_command(text)
         if text.startswith('/'):
             self._cmd(text); return
         self.messages.append(('user', text))
@@ -542,6 +614,54 @@ class NexusTerminalV2:
             task = ' '.join(parts[1:]) or 'Analyze current system state and surface insights.'
             self.swarm.broadcast(task)
             self.messages.append(('nexus',f'Broadcast to all 5 agents: "{task[:60]}"'))
+
+        elif c == '/consensus':
+            question = ' '.join(parts[1:])
+            if not question:
+                self.messages.append(('nexus','Usage: /consensus <question> — all 5 agents answer, then synthesize'))
+            else:
+                self.messages.append(('user', question))
+                def run_consensus():
+                    self.ai_stream = True
+                    self.cur_resp  = ''
+                    res = self.swarm.consensus(
+                        question,
+                        on_token=lambda t: setattr(self, 'cur_resp', self.cur_resp + t),
+                        ollama=self.brain.ollama)
+                    self.messages.append(('nexus', '[CONSENSUS] ' + res['consensus']))
+                    if self.memory:
+                        self.memory.add_message('user', question)
+                        self.memory.add_message('nexus', res['consensus'][:500])
+                    self.cur_resp  = ''
+                    self.ai_stream = False
+                threading.Thread(target=run_consensus, daemon=True).start()
+                self.messages.append(('nexus','5 agents deliberating in parallel...'))
+
+        elif c == '/remember':
+            fact = ' '.join(parts[1:])
+            if not fact:
+                self.messages.append(('nexus','Usage: /remember <fact> — NEXUS keeps this across restarts'))
+            elif self.memory:
+                self.memory.remember(fact)
+                self.messages.append(('nexus',f'Committed to long-term memory: "{fact[:80]}"'))
+            else:
+                self.messages.append(('nexus','Memory subsystem not available.'))
+
+        elif c == '/recall':
+            if not self.memory:
+                self.messages.append(('nexus','Memory subsystem not available.'))
+            else:
+                facts = self.memory.facts()
+                st = self.memory.stats()
+                if facts:
+                    listing = '\n'.join(f'  • {f}' for f in facts[-12:])
+                    self.messages.append(('nexus',
+                        f'[MEMORY] boot #{st["boots"]} · {st["total_msgs"]} msgs · '
+                        f'{st["age_days"]}d old · {st["facts"]} facts\n{listing}'))
+                else:
+                    self.messages.append(('nexus',
+                        f'[MEMORY] boot #{st["boots"]} · {st["total_msgs"]} msgs · '
+                        f'{st["age_days"]}d old · no facts yet. Use /remember <fact>'))
 
         elif c == '/scan':
             threading.Thread(target=self.security._scan_subnet, daemon=True).start()

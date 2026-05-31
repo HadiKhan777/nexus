@@ -203,6 +203,66 @@ class AgentSwarm:
         """Send a task to ALL agents simultaneously."""
         self.bus.send(AgentMessage('user', 'broadcast', task, 'task'))
 
+    def consensus(self, question, on_token=None, ollama=None):
+        """
+        Run all 5 agents on the SAME question in parallel, then synthesize
+        their answers into a single consensus response.
+
+        Each agent answers through the lens of its specialty, then a
+        synthesis pass merges the distinct perspectives. This is the swarm's
+        most powerful mode — five viewpoints collapsed into one answer.
+        """
+        import concurrent.futures
+
+        ollama = ollama or next(iter(self.agents.values())).ollama
+        results = {}
+
+        def ask(agent):
+            parts = []
+            agent.status  = 'thinking'
+            agent.thought = f'consensus: {question[:40]}...'
+            ctx = agent.rag.build_context(question) if agent.rag.docs else ''
+            prompt = f'{ctx}Question: {question}\nAnswer from your specialty in 2-3 sentences:'
+            agent.ollama.stream(prompt, system=agent.config['system'],
+                                on_token=lambda t: parts.append(t))
+            agent.status  = 'done'
+            text = ''.join(parts).strip()
+            agent.thought = text[:80]
+            return agent.name, text
+
+        # Fan out to all agents at once
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+            futures = [pool.submit(ask, a) for a in self.agents.values()]
+            for fut in concurrent.futures.as_completed(futures):
+                name, text = fut.result()
+                results[name] = text
+
+        # Synthesis pass — merge the 5 perspectives
+        viewpoints = '\n'.join(
+            f'[{name}]: {results.get(name, "(no answer)")}'
+            for name in self.agents
+        )
+        synth_prompt = (
+            f'Five specialist agents answered the question: "{question}"\n\n'
+            f'{viewpoints}\n\n'
+            f'Synthesize these into one clear, authoritative answer. '
+            f'Resolve any disagreements. Be concise.'
+        )
+        synth_system = ('You are the NEXUS SYNTHESIZER. You merge multiple expert '
+                        'opinions into a single coherent answer.')
+        final = []
+        def collect(t):
+            final.append(t)
+            if on_token:
+                on_token(t)
+        ollama.stream(synth_prompt, system=synth_system, on_token=collect)
+
+        # Reset agents to idle
+        for a in self.agents.values():
+            a.status = 'idle'
+
+        return {'perspectives': results, 'consensus': ''.join(final)}
+
     def status_snapshot(self):
         return [
             {

@@ -76,7 +76,9 @@ def main():
     security = SecurityWorker()
     security.start()
 
-    brain       = Brain(rag)
+    from brain.memory import Memory
+    memory      = Memory()
+    brain       = Brain(rag, memory=memory)
     swarm       = AgentSwarm(rag, brain.ollama)
     voice       = VoiceEngine()
     vision      = VisionWorker(device=0, width=36, height=12)
@@ -87,7 +89,7 @@ def main():
 
     self_mod = SelfModifyEngine(brain)
     ui = NexusTerminalV2(brain, rag, neural, security, swarm, vision, github, voice,
-                         file_watch=file_watch, self_modify=self_mod)
+                         file_watch=file_watch, self_modify=self_mod, memory=memory)
 
     # WebSocket bridge for 3D viz
     ws = NexusWSServer(neural, security, brain)

@@ -115,43 +115,44 @@ class CodeExecutor:
 
 
 class Brain:
-    def __init__(self, rag, status_cb=None):
+    def __init__(self, rag, status_cb=None, memory=None):
         self.rag      = rag
         self.ollama   = OllamaClient()
         self.executor = CodeExecutor()
         self.status   = status_cb or (lambda s: None)
-        self.history  = []   # conversation history
+        self.memory   = memory
+        self.history  = list(memory.recent_conversation(8)) if memory else []
         self._lock    = threading.Lock()
 
     def think(self, user_input, on_token):
-        """Main entry: RAG retrieval → Ollama response → optional execution."""
-        # Get relevant context from RAG
+        """RAG + persistent memory → Ollama → optional code execution."""
         context = self.rag.build_context(user_input)
+        if self.memory:
+            context = self.memory.facts_context() + context
 
-        # Build prompt with history + context
         hist_str = '\n'.join(
             f'{"User" if r=="user" else "NEXUS"}: {m}'
             for r, m in self.history[-6:]
         )
-
         prompt = f'{context}Conversation:\n{hist_str}\nUser: {user_input}\nNEXUS:'
 
-        # Store user message
         with self._lock:
             self.history.append(('user', user_input))
+        if self.memory:
+            self.memory.add_message('user', user_input)
 
-        # Stream response
         full_response = []
         def collect(tok):
             full_response.append(tok)
             on_token(tok)
-
         self.ollama.stream(prompt, on_token=collect)
 
         response_text = ''.join(full_response)
 
         with self._lock:
             self.history.append(('nexus', response_text[:500]))
+        if self.memory:
+            self.memory.add_message('nexus', response_text[:500])
 
         # Auto-execute if code block detected
         if '```python' in response_text and '/norun' not in user_input:
