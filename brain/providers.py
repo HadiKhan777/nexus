@@ -397,19 +397,42 @@ class OpenRouterProvider(BaseProvider):
                 on_token(f'\n[OpenRouter error: {e}]')
 
 
+
+
+class GroqVariantProvider(GroqProvider):
+    """Groq with a specific model — reuses GroqProvider implementation."""
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.name = f"Groq/{cfg.get('model','?').split('/')[-1][:20]}"
+
+
+class OpenRouterVariantProvider(OpenRouterProvider):
+    """OpenRouter with a specific model — reuses OpenRouterProvider."""
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.name = f"OR/{cfg.get('model','?').split('/')[-1][:20]}"
+
 def build_providers():
     """Load config and instantiate all providers. Returns dict name→provider."""
     cfg = load_config()
     ollama = OllamaProvider(cfg.get('ollama', {}))
     return {
-        'ollama':     ollama,
-        'openai':     OpenAIProvider(cfg.get('openai', {})),
-        'gemini':     GeminiProvider(cfg.get('gemini', {})),
-        'deepseek':   DeepSeekProvider(cfg.get('deepseek', {})),
-        'kimi':       KimiProvider(cfg.get('kimi', {})),
-        'anthropic':  AnthropicProvider(cfg.get('anthropic', {})),
-        'groq':       GroqProvider(cfg.get('groq', {})),
-        'openrouter': OpenRouterProvider(cfg.get('openrouter', {})),
+        'ollama':          ollama,
+        'openai':          OpenAIProvider(cfg.get('openai', {})),
+        'gemini':          GeminiProvider(cfg.get('gemini', {})),
+        'deepseek':        DeepSeekProvider(cfg.get('deepseek', {})),
+        'kimi':            KimiProvider(cfg.get('kimi', {})),
+        'anthropic':       AnthropicProvider(cfg.get('anthropic', {})),
+        'groq':            GroqProvider(cfg.get('groq', {})),
+        'openrouter':      OpenRouterProvider(cfg.get('openrouter', {})),
+        # Specialized variants — best model per task
+        'groq_120b':       GroqVariantProvider(cfg.get('groq_120b', {})),
+        'groq_qwen3':      GroqVariantProvider(cfg.get('groq_qwen3', {})),
+        'groq_llama4':     GroqVariantProvider(cfg.get('groq_llama4', {})),
+        'or_coder':        OpenRouterVariantProvider(cfg.get('or_coder', {})),
+        'or_hermes405b':   OpenRouterVariantProvider(cfg.get('or_hermes405b', {})),
+        'or_nemotron120b': OpenRouterVariantProvider(cfg.get('or_nemotron120b', {})),
+        'or_kimi':         OpenRouterVariantProvider(cfg.get('or_kimi', {})),
     }
 
 

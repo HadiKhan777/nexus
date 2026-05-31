@@ -152,6 +152,9 @@ class Agent:
         self.provider.stream(prompt, system=self.config['system'], on_token=tok)
 
         full = ''.join(result)
+        # Strip <think>...</think> reasoning blocks (Qwen3 thinking model)
+        import re as _re
+        full = _re.sub(r'<think>.*?</think>', '', full, flags=_re.DOTALL).strip()
         self.history.append(('task', task))
         self.history.append(('result', full[:300]))
         self.status  = 'done'
@@ -173,12 +176,14 @@ class Agent:
 
 # Provider assignment per agent — best available provider for each specialty
 AGENT_PROVIDERS = {
-    # Free-first routing: Groq/Gemini/OpenRouter are all free tiers
-    'CODER':     ['groq', 'deepseek', 'openrouter', 'ollama'],
-    'TRAINER':   ['ollama', 'groq', 'openrouter'],
-    'GUARDIAN':  ['groq', 'openrouter', 'kimi', 'ollama'],
-    'ORACLE':    ['gemini', 'groq', 'openrouter', 'ollama'],
-    'ARCHITECT': ['groq', 'gemini', 'openrouter', 'ollama'],
+    # All free. Verified working as of 2026-06.
+    # Groq: llama-3.3-70b · gpt-oss-120b · qwen3-32b · llama-4-scout · llama-3.1-8b
+    # OpenRouter: gemma-4-31b · gemma-4-26b · gpt-oss-20b · glm-4.5-air
+    'CODER':     ['groq_qwen3',  'groq_llama4',  'groq',       'or_gpt20b',  'ollama'],
+    'TRAINER':   ['ollama',      'groq',         'or_gemma26b'],
+    'GUARDIAN':  ['groq_120b',   'groq',         'or_gemma31b','or_glm',     'ollama'],
+    'ORACLE':    ['groq_120b',   'or_gemma31b',  'groq',       'or_gpt20b',  'ollama'],
+    'ARCHITECT': ['groq_llama4', 'groq_120b',    'groq',       'or_gemma31b','ollama'],
 }
 
 
