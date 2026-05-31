@@ -17,7 +17,9 @@ DEFAULT_CONFIG = {
     "gemini":    {"api_key": "", "model": "gemini-1.5-flash"},
     "deepseek":  {"api_key": "", "model": "deepseek-chat"},
     "kimi":      {"api_key": "", "model": "moonshot-v1-8k"},
-    "anthropic": {"api_key": "", "model": "claude-haiku-4-5-20251001"},
+    "anthropic":    {"api_key": "", "model": "claude-haiku-4-5-20251001"},
+    "groq":        {"api_key": "", "model": "llama-3.1-70b-versatile"},
+    "openrouter":  {"api_key": "", "model": "meta-llama/llama-3.1-8b-instruct:free"},
 }
 
 
@@ -291,17 +293,107 @@ class AnthropicProvider(BaseProvider):
                 on_token(f'\n[Anthropic error: {e}]')
 
 
+
+class GroqProvider(BaseProvider):
+    """Groq — free, extremely fast inference. OpenAI-compatible."""
+    name = 'Groq'
+
+    def __init__(self, cfg):
+        self.api_key = cfg.get('api_key', '')
+        self.model   = cfg.get('model', 'llama-3.1-70b-versatile')
+        self.base    = 'https://api.groq.com/openai/v1'
+
+    def available(self):
+        return bool(self.api_key and self.api_key.startswith('gsk_'))
+
+    def stream(self, prompt, system='', on_token=None):
+        headers = {'Authorization': f'Bearer {self.api_key}',
+                   'Content-Type': 'application/json'}
+        payload = {
+            'model': self.model, 'stream': True,
+            'messages': [
+                {'role': 'system', 'content': system},
+                {'role': 'user',   'content': prompt},
+            ]
+        }
+        try:
+            with requests.post(f'{self.base}/chat/completions',
+                               headers=headers, json=payload,
+                               stream=True, timeout=60) as r:
+                for line in r.iter_lines():
+                    if not line or b'[DONE]' in line:
+                        continue
+                    raw = line.decode().removeprefix('data: ')
+                    try:
+                        delta = json.loads(raw)['choices'][0]['delta']
+                        tok = delta.get('content', '')
+                        if tok and on_token:
+                            on_token(tok)
+                    except Exception:
+                        pass
+        except Exception as e:
+            if on_token:
+                on_token(f'\n[Groq error: {e}]')
+
+
+class OpenRouterProvider(BaseProvider):
+    """OpenRouter — free models (llama, gemma, mistral). OpenAI-compatible."""
+    name = 'OpenRouter'
+
+    def __init__(self, cfg):
+        self.api_key = cfg.get('api_key', '')
+        self.model   = cfg.get('model', 'meta-llama/llama-3.1-8b-instruct:free')
+        self.base    = 'https://openrouter.ai/api/v1'
+
+    def available(self):
+        return bool(self.api_key and self.api_key.startswith('sk-or-'))
+
+    def stream(self, prompt, system='', on_token=None):
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/HadiKhan777/nexus',
+        }
+        payload = {
+            'model': self.model, 'stream': True,
+            'messages': [
+                {'role': 'system', 'content': system},
+                {'role': 'user',   'content': prompt},
+            ]
+        }
+        try:
+            with requests.post(f'{self.base}/chat/completions',
+                               headers=headers, json=payload,
+                               stream=True, timeout=60) as r:
+                for line in r.iter_lines():
+                    if not line or b'[DONE]' in line:
+                        continue
+                    raw = line.decode().removeprefix('data: ')
+                    try:
+                        delta = json.loads(raw)['choices'][0]['delta']
+                        tok = delta.get('content', '')
+                        if tok and on_token:
+                            on_token(tok)
+                    except Exception:
+                        pass
+        except Exception as e:
+            if on_token:
+                on_token(f'\n[OpenRouter error: {e}]')
+
+
 def build_providers():
     """Load config and instantiate all providers. Returns dict name→provider."""
     cfg = load_config()
     ollama = OllamaProvider(cfg.get('ollama', {}))
     return {
-        'ollama':    ollama,
-        'openai':    OpenAIProvider(cfg.get('openai', {})),
-        'gemini':    GeminiProvider(cfg.get('gemini', {})),
-        'deepseek':  DeepSeekProvider(cfg.get('deepseek', {})),
-        'kimi':      KimiProvider(cfg.get('kimi', {})),
-        'anthropic': AnthropicProvider(cfg.get('anthropic', {})),
+        'ollama':     ollama,
+        'openai':     OpenAIProvider(cfg.get('openai', {})),
+        'gemini':     GeminiProvider(cfg.get('gemini', {})),
+        'deepseek':   DeepSeekProvider(cfg.get('deepseek', {})),
+        'kimi':       KimiProvider(cfg.get('kimi', {})),
+        'anthropic':  AnthropicProvider(cfg.get('anthropic', {})),
+        'groq':       GroqProvider(cfg.get('groq', {})),
+        'openrouter': OpenRouterProvider(cfg.get('openrouter', {})),
     }
 
 

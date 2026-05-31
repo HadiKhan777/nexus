@@ -173,11 +173,12 @@ class Agent:
 
 # Provider assignment per agent — best available provider for each specialty
 AGENT_PROVIDERS = {
-    'CODER':     ['deepseek', 'openai', 'ollama'],   # DeepSeek is best at code
-    'TRAINER':   ['ollama', 'deepseek', 'openai'],   # local ML monitoring
-    'GUARDIAN':  ['kimi', 'openai', 'ollama'],        # Kimi good at analysis
-    'ORACLE':    ['gemini', 'anthropic', 'ollama'],   # Gemini for knowledge
-    'ARCHITECT': ['openai', 'anthropic', 'ollama'],   # GPT-4 for system design
+    # Free-first routing: Groq/Gemini/OpenRouter are all free tiers
+    'CODER':     ['groq', 'deepseek', 'openrouter', 'ollama'],
+    'TRAINER':   ['ollama', 'groq', 'openrouter'],
+    'GUARDIAN':  ['groq', 'openrouter', 'kimi', 'ollama'],
+    'ORACLE':    ['gemini', 'groq', 'openrouter', 'ollama'],
+    'ARCHITECT': ['groq', 'gemini', 'openrouter', 'ollama'],
 }
 
 
