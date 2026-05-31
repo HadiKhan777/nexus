@@ -204,11 +204,15 @@ class NexusTerminalV2:
         self.spin_idx = (self.spin_idx + 1) % len(SPIN)
 
     def _size(self):
-        try:
-            s = os.get_terminal_size()
-            return s.columns, s.lines
-        except:
-            return 160, 50
+        for _ in range(10):
+            try:
+                s = os.get_terminal_size()
+                if s.columns > 20 and s.lines > 10:
+                    return s.columns, s.lines
+            except:
+                pass
+            time.sleep(0.1)
+        return 160, 50
 
     def _header(self, cols, rows):
         t = datetime.now().strftime('%H:%M:%S')
@@ -647,6 +651,7 @@ class NexusTerminalV2:
             tty.setraw(fd)
 
             def render_loop():
+                time.sleep(0.3)   # let terminal settle after setraw
                 err_count = 0
                 while self._running:
                     try:
