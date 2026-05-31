@@ -642,9 +642,14 @@ class NexusTerminalV2:
 
         LOG = open('/tmp/nexus_debug.log', 'w')
 
-        # Open /dev/tty directly so NEXUS works regardless of how it's launched
-        tty_file = open('/dev/tty', 'r+b', buffering=0)
-        tty_fd   = tty_file.fileno()
+        # Use /dev/tty if available (works even when stdin is redirected),
+        # otherwise fall back to stdin
+        try:
+            tty_file = open('/dev/tty', 'r+b', buffering=0)
+            tty_fd   = tty_file.fileno()
+        except OSError:
+            tty_file = None
+            tty_fd   = sys.stdin.fileno()
 
         cols, rows = self._size()
         LOG.write(f'Terminal size: {cols}x{rows}\n'); LOG.flush()
@@ -688,7 +693,7 @@ class NexusTerminalV2:
         finally:
             self._running = False
             termios.tcsetattr(tty_fd, termios.TCSADRAIN, old)
-            tty_file.close()
+            if tty_file: tty_file.close()
             sys.stdout.write(show()+norm())
             sys.stdout.flush()
             LOG.write('NEXUS exited cleanly\n'); LOG.close()
