@@ -299,7 +299,7 @@ class NexusTerminalV2:
             lines.append(('', ''))
             for i, chunk in enumerate(textwrap.wrap(self.cur_resp, w-4)[-3:]):
                 char = GLITCH[self.spin_idx % len(GLITCH)] if i == 0 else ' '
-                lines.append((rgb(0,200,160)+char+' '+rst(), rgb(150,200,180)+chunk+rst()))
+                lines.append((rgb(0,200,160)+char+' '+rst(), rgb(180,230,200)+chunk+rst()))
 
         display = lines[-avail:]
         for i, (pre, txt) in enumerate(display):
@@ -419,7 +419,7 @@ class NexusTerminalV2:
 
     def _panel_github(self, row, col, w, h):
         events, stars, last = self.github.get_feed()
-        self.w(mv(row,col), gradient('◈ GITHUB',100,150,255,0,200,255),
+        self.w(mv(row,col), gradient("◈ GITHUB",0,200,255,0,255,200),
                dim()+f'  HadiKhan777  '+rst(), rgb(255,220,0)+f'★{stars}'+rst())
         self.w(mv(row+1,col), rgb(10,20,40)+'─'*(w-1)+rst())
 
@@ -430,7 +430,7 @@ class NexusTerminalV2:
             lc   = (0,200,255) if lang in ('JavaS','Node.') else (200,255,0) if lang=='Pytho' else (255,140,0)
             self.w(mv(row+2+i,col),
                    rgb(*lc)+f'{lang:<5}'+rst(), ' ',
-                   rgb(180,210,255)+repo.ljust(12)+rst(), ' ',
+                   rgb(200,255,220)+repo.ljust(12)+rst(), ' ',
                    dim()+age+rst())
 
     def _panel_filewatcher(self, row, col, w, h):
@@ -478,7 +478,7 @@ class NexusTerminalV2:
             (rgb(255,180,0),   '/agent',   ' NAME task'),
             (rgb(170,50,255),  '/evolve',  ' self-modify'),
             (rgb(255,100,0),   '/camera',  ' toggle'),
-            (rgb(100,150,255), '/3d',      ''),
+            (rgb(80,200,255), '/3d',      ''),
             (rgb(255,50,100),  '/quit',    ''),
         ]
         cmds = '  '.join(c+k+rst()+dim()+v+rst() for c,k,v in pairs)
