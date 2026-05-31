@@ -82,7 +82,9 @@ def main():
     from brain.obsidian_writer import ObsidianWriter
     providers   = build_providers()
     obs_writer  = ObsidianWriter()
-    brain       = Brain(rag, memory=memory)
+    from brain.providers import best_available as _best
+    chat_provider = _best(providers, ['groq', 'openrouter', 'ollama'])
+    brain       = Brain(rag, memory=memory, provider=chat_provider)
     swarm       = AgentSwarm(rag, brain.ollama,
                              providers=providers, obs_writer=obs_writer)
     voice       = VoiceEngine()

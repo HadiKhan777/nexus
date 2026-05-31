@@ -115,9 +115,10 @@ class CodeExecutor:
 
 
 class Brain:
-    def __init__(self, rag, status_cb=None, memory=None):
+    def __init__(self, rag, status_cb=None, memory=None, provider=None):
         self.rag      = rag
-        self.ollama   = OllamaClient()
+        self.ollama   = OllamaClient()           # kept for compatibility checks
+        self.provider = provider or self.ollama  # what actually handles chat
         self.executor = CodeExecutor()
         self.status   = status_cb or (lambda s: None)
         self.memory   = memory
@@ -145,7 +146,7 @@ class Brain:
         def collect(tok):
             full_response.append(tok)
             on_token(tok)
-        self.ollama.stream(prompt, on_token=collect)
+        self.provider.stream(prompt, on_token=collect)
 
         response_text = ''.join(full_response)
 

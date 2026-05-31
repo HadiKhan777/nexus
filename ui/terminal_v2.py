@@ -232,7 +232,8 @@ class NexusTerminalV2:
         t = datetime.now().strftime('%H:%M:%S')
         spin = rgb(200,255,0)+SPIN[self.spin_idx]+rst() if self.ai_stream else rgb(0,80,0)+'●'+rst()
 
-        ollama       = rgb(50,255,100)+'●'+rst() if self.brain.ollama.available else rgb(80,80,80)+'○'+rst()
+        pname  = getattr(self.brain.provider, 'name', 'Ollama')
+        ollama = rgb(50,255,100)+'●'+rst() if self.brain.provider.available() else rgb(80,80,80)+'○'+rst()
         docs         = str(self.rag.indexed)
         agents_alive = sum(1 for a in self.swarm.agents.values() if a.status != 'idle')
 
@@ -241,7 +242,7 @@ class NexusTerminalV2:
         # Build right side as plain text first to measure, then color
         right_plain = f'● OLLAMA  DOCS:{docs}  AGENTS:{agents_alive}/5  {t}'
         right_col   = max(1, cols - len(right_plain) - 2)
-        right_full  = f'{spin} {ollama}{dim()} OLLAMA{rst()}  {dim()}DOCS:{rst()}{rgb(200,255,0)}{docs}{rst()}  {dim()}AGENTS:{rst()}{rgb(0,255,180)}{agents_alive}/5{rst()}  {dim()}{t}{rst()}'
+        right_full  = f'{spin} {ollama}{dim()} {pname}{rst()}  {dim()}DOCS:{rst()}{rgb(200,255,0)}{docs}{rst()}  {dim()}AGENTS:{rst()}{rgb(0,255,180)}{agents_alive}/5{rst()}  {dim()}{t}{rst()}'
 
         self.w(mv(1,1), bgrgb(2,2,8), ' '*cols, rst())
         self.w(mv(1,2), title)
